@@ -5,38 +5,62 @@ Generates short anime-style videos from a single image using FramePack I2V
 
 ---
 
+## How it works
+
+The worker uses the **ComfyUI subprocess pattern**:
+
+1. `entrypoint.sh` symlinks the RunPod network volume model dirs into
+   `/app/ComfyUI/models/` and then execs `handler.py`.
+2. On first job, `handler.py` downloads any missing model weights from
+   HuggingFace in parallel (5 threads, `curl -L --fail -C -`).
+3. `handler.py` launches ComfyUI (`/app/ComfyUI/main.py`) as a background
+   subprocess on `127.0.0.1:8188`, then polls `/system_stats` until ready
+   and verifies `FramePackSampler`, `LoadFramePackModel`, and `DualCLIPLoader`
+   are registered via `/object_info`.
+4. The keyframe image is uploaded to ComfyUI via `POST /upload/image`.
+5. The bundled `workflow.json` (copied from
+   `workflows/framepack_long_i2v_remote.json` at build time) is deep-copied
+   and patched with the job's `prompt`, `negative_prompt`, `duration_s`,
+   `steps`, `cfg`, and `seed` values by `_meta.title` matching.
+6. The patched workflow is queued via `POST /prompt`; completion is polled
+   at `GET /history/:id`.
+7. The finished `.mp4` is downloaded from `GET /view` and returned as
+   base64 in `video_b64`.
+
+This pattern is completely decoupled from ComfyUI's Python internals — no
+direct imports of custom node modules are needed.
+
+---
+
 ## Architecture
 
 | Layer | What lives there |
 |---|---|
-| Docker image (~2 GB) | Python code, PyTorch, FramePackWrapper |
+| Docker image (~3–4 GB) | Python, PyTorch, ComfyUI, FramePackWrapper, VideoHelperSuite |
 | RunPod Network Volume (50 GB) | All model weights (~25.2 GB total) |
 
-On first invocation the handler downloads the 5 weight files from
-HuggingFace in parallel.  Every subsequent invocation skips the download.
-Cold start after download: ~30–60 s.  Warm (already loaded in GPU): ~2 s.
+Custom nodes bundled in the image:
+- `ComfyUI-FramePackWrapper` (kijai/ComfyUI-FramePackWrapper)
+- `ComfyUI-VideoHelperSuite` (Kosinkadink/ComfyUI-VideoHelperSuite)
+
+On first invocation the handler downloads 5 weight files from HuggingFace
+in parallel. Every subsequent invocation skips the download (file-size check).
+Cold start after download: ~30–60 s. Warm (ComfyUI already up): ~2 s overhead.
 
 ---
 
 ## Step 1 — Push to GitHub
 
 ```bash
-# From inside runpod_endpoint/ (this directory):
 cd /path/to/dorohedoro_anime_maker/runpod_endpoint
 
 git init
 git add .
 git commit -m "Initial FramePack I2V serverless worker"
-
-# Create a new repo on GitHub, then:
 git remote add origin https://github.com/YOUR_USERNAME/runpod-framepack-worker.git
 git branch -M main
 git push -u origin main
 ```
-
-**Private repo:** You must add a Deploy Key or Personal Access Token (PAT) in
-the RunPod Console under Settings → Secrets → GitHub so RunPod can pull the
-repo.  A public repo requires no token.
 
 ---
 
@@ -45,8 +69,7 @@ repo.  A public repo requires no token.
 In the RunPod Console:
 
 1. **Storage → Network Volumes → + New Network Volume**
-2. Name: `framepack-models`  |  Size: **50 GB**  |  Region: pick one near
-   your preferred GPU datacenter.
+2. Name: `framepack-models`  |  Size: **50 GB**  |  Region: near your GPU datacenter.
 3. Note the volume ID for Step 3.
 
 ---
@@ -55,20 +78,14 @@ In the RunPod Console:
 
 1. **Serverless → + New Endpoint**
 2. Select **Custom Source → GitHub Repo**
-3. Paste your repo URL: `https://github.com/YOUR_USERNAME/runpod-framepack-worker`
+3. Paste: `https://github.com/YOUR_USERNAME/runpod-framepack-worker`
 4. Branch: `main`
-5. **GPU:** RTX 4090 (24 GB VRAM) recommended — fp8 transformer fits in 12 GB
-   VRAM, leaving headroom for VAE decode and CLIP.
-   - On-demand spot price: ~$0.34/hr (as of 2025)
-   - Idle workers: ~$0.09/hr on spot
-6. **Min/Max Workers:** 0 / 1 for low-volume use; increase Max for parallelism.
-7. **Network Volume:** attach `framepack-models` at mount path `/runpod-volume`
-8. **Environment Variables** (optional but recommended):
-   - `HF_TOKEN` — your HuggingFace read token (all models here are public, so
-     only needed if you hit anonymous rate limits)
-9. Click **Deploy**.
-
-Build takes 5–8 minutes.  Watch the build log; the image is ~2 GB.
+5. **GPU:** RTX 4090 (24 GB VRAM) recommended.
+6. **Min/Max Workers:** 0 / 1 for low-volume use.
+7. **Network Volume:** attach `framepack-models` at `/runpod-volume`
+8. **Environment Variables:**
+   - `HF_TOKEN` — HuggingFace read token (recommended to avoid rate limits)
+9. Click **Deploy**. Build takes 5–10 min (~3–4 GB image).
 
 ---
 
@@ -79,10 +96,9 @@ Build takes 5–8 minutes.  Watch the build log; the image is ~2 GB.
 ```python
 import runpod, base64, pathlib
 
-runpod.api_key = "YOUR_RUNPOD_API_KEY"  # from RunPod Console → Settings → API Keys
-endpoint = runpod.Endpoint("YOUR_ENDPOINT_ID")  # from Serverless → your endpoint
+runpod.api_key = "YOUR_RUNPOD_API_KEY"
+endpoint = runpod.Endpoint("YOUR_ENDPOINT_ID")
 
-# Read and encode your source image
 image_b64 = base64.b64encode(pathlib.Path("my_image.png").read_bytes()).decode()
 
 result = endpoint.run_sync({
@@ -90,14 +106,12 @@ result = endpoint.run_sync({
         "image_b64":       image_b64,
         "prompt":          "A ninja leaping across rooftops at night, cinematic",
         "negative_prompt": "blurry, low quality, static, no movement",
-        "duration_s":      6,       # seconds of video
+        "duration_s":      6,
         "steps":           25,
         "cfg":             7.0,
         "seed":            42,
-        "width":           768,
-        "height":          432,
     }
-}, timeout=600)  # first-run can take 10+ min for model download
+}, timeout=600)
 
 if "error" in result:
     print("Error:", result["error"])
@@ -105,13 +119,12 @@ if "error" in result:
 else:
     video_bytes = base64.b64decode(result["video_b64"])
     pathlib.Path("output.mp4").write_bytes(video_bytes)
-    print(f"Saved output.mp4  ({result['frames']} frames, {result['duration_s']}s, {result['elapsed_s']}s elapsed)")
+    print(f"Saved output.mp4  ({result['duration_s']}s, {result['elapsed_s']}s elapsed)")
 ```
 
 ### cURL
 
 ```bash
-# Submit a job
 curl -s -X POST "https://api.runpod.io/v2/YOUR_ENDPOINT_ID/run" \
   -H "Authorization: Bearer YOUR_RUNPOD_API_KEY" \
   -H "Content-Type: application/json" \
@@ -125,11 +138,6 @@ curl -s -X POST "https://api.runpod.io/v2/YOUR_ENDPOINT_ID/run" \
       "seed": 42
     }
   }'
-# Returns: {"id": "JOB_ID", "status": "IN_QUEUE"}
-
-# Poll for result
-curl -s "https://api.runpod.io/v2/YOUR_ENDPOINT_ID/status/JOB_ID" \
-  -H "Authorization: Bearer YOUR_RUNPOD_API_KEY"
 ```
 
 ---
@@ -138,23 +146,20 @@ curl -s "https://api.runpod.io/v2/YOUR_ENDPOINT_ID/status/JOB_ID" \
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `image_b64` | string | Yes | — | Base64-encoded source image (JPEG/PNG/etc.) |
+| `image_b64` | string | Yes | — | Base64-encoded source image (JPEG/PNG) |
 | `prompt` | string | Yes | — | Text description of motion and scene |
-| `negative_prompt` | string | No | `"blurry, low quality, distorted"` | What to avoid |
+| `negative_prompt` | string | No | `""` | What to avoid |
 | `duration_s` | float | No | `10` | Video length in seconds |
-| `steps` | int | No | `25` | Diffusion sampling steps (more = slower + better) |
+| `steps` | int | No | `25` | Diffusion sampling steps |
 | `cfg` | float | No | `7.0` | CFG guidance scale |
-| `seed` | int | No | `42` | Random seed for reproducibility |
-| `width` | int | No | `768` | Output width in pixels |
-| `height` | int | No | `432` | Output height in pixels |
+| `seed` | int | No | `42` | Random seed |
 
 ## Output Schema
 
 | Field | Type | Description |
 |---|---|---|
 | `video_b64` | string | Base64-encoded MP4 |
-| `duration_s` | float | Actual video duration |
-| `frames` | int | Frame count |
+| `duration_s` | float | Requested duration |
 | `elapsed_s` | float | Wall-clock time for this job |
 | `error` | string | Present only on failure |
 | `traceback` | string | Present only on failure |
@@ -163,15 +168,14 @@ curl -s "https://api.runpod.io/v2/YOUR_ENDPOINT_ID/status/JOB_ID" \
 
 ## Troubleshooting
 
-**"Could not import nodes_framepack"** — The FramePackWrapper git clone in the
-Dockerfile failed, or `PYTHONPATH` is not set.  Check the build log.
+**"ComfyUI is missing required nodes"** — The custom node git clone in the
+Dockerfile failed. Check the build log for clone errors.
 
-**OOM on first invocation** — The fp8 transformer needs ~12 GB VRAM.  Use an
-RTX 4090 (24 GB) or A100.  An RTX 3090 (24 GB) also works but is slower.
+**ComfyUI not ready within 180 s** — Check `/tmp/comfy.log` in the container
+logs for import errors. Usually a missing Python dependency.
 
-**Download stuck** — HuggingFace occasionally rate-limits anonymous requests.
-Set the `HF_TOKEN` environment variable in the endpoint config.
+**OOM on first invocation** — The fp8 transformer needs ~12 GB VRAM. Use
+RTX 4090 (24 GB) or A100.
 
-**`libx264` not found** — Ubuntu 22.04's `apt` ffmpeg includes libx264.  If you
-see a codec error, the imageio encoder falls back to `mp4v` automatically;
-output quality is slightly lower but otherwise identical.
+**Download stuck** — Set `HF_TOKEN` in the endpoint environment variables
+to avoid HuggingFace anonymous rate limits.
