@@ -1,0 +1,38 @@
+# =============================================================================
+# requirements.txt — FramePack I2V RunPod Serverless Worker
+#
+# PyTorch itself is installed separately in the Dockerfile via the official
+# cu121 index, so it is intentionally absent here.
+#
+# numpy<2 — FramePackWrapper and diffusers are not yet numpy 2.x-compatible;
+#            pin to <2 to avoid silent breakage.
+# opencv-python-headless — no GUI dependencies (headless server environment).
+# imageio[ffmpeg] — video frame encoding; the [ffmpeg] extra installs the
+#                   imageio-ffmpeg backend which wraps the system ffmpeg binary.
+# =============================================================================
+
+# RunPod SDK — required for runpod.serverless.start() and progress_update()
+runpod>=1.9.0
+
+# Diffusers ecosystem
+diffusers>=0.30
+transformers>=4.40
+accelerate>=0.30
+safetensors>=0.4
+
+# Tensor utilities used by FramePackWrapper
+einops>=0.7
+
+# Video encoding
+imageio[ffmpeg]>=2.34
+
+# Image I/O (used for decoding input JPEG/PNG from base64)
+opencv-python-headless
+pillow
+
+# Numeric core — must stay <2 for FramePackWrapper compatibility
+numpy<2
+
+# HTTP downloads for model weight fetching
+requests
+tqdm

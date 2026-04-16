@@ -1,0 +1,42 @@
+# =============================================================================
+# .dockerignore — FramePack I2V RunPod Serverless Worker
+#
+# Keeps the Docker build context small.  The image ships only the five files
+# in this directory; everything else is either installed at build time (Python
+# packages, FramePackWrapper) or lives on the network volume (model weights).
+# =============================================================================
+
+# Exclude everything by default, then whitelist what we need.
+*
+
+# Keep only the files the Dockerfile COPYs.
+!handler.py
+!requirements.txt
+!entrypoint.sh
+
+# Also allow the Dockerfile itself and this ignore file into the context so
+# docker build can introspect them if needed.
+!Dockerfile
+!.dockerignore
+
+# The README is not needed inside the container.
+README.md
+
+# Python byte-code and caches should never enter the build context.
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Editor / OS artifacts.
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Git metadata (large in some repos; not needed in container).
+.git/
+.gitignore
