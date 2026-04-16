@@ -1,39 +1,22 @@
 {
-  "_comment": [
-    "ComfyUI API-format workflow for FramePack long image-to-video generation.",
-    "",
-    "Node class_types sourced from:",
-    "  FramePackWrapper nodes.py NODE_CLASS_MAPPINGS (kijai/ComfyUI-FramePackWrapper, HEAD a0eeaa6993e8)",
-    "  ComfyUI nodes.py NODE_CLASS_MAPPINGS (comfyanonymous/ComfyUI, master 2025-04)",
-    "  ComfyUI-VideoHelperSuite nodes.py NODE_CLASS_MAPPINGS (Kosinkadink, HEAD 2984ec4c4b93)",
-    "",
-    "Data-flow summary:",
-    "  [DualCLIPLoader] ──────────┐",
-    "  [CLIPTextEncode pos/neg] ──┼──> [FramePackSampler] -> [VAEDecode] -> [VHS_VideoCombine]",
-    "  [LoadFramePackModel] ───────┘                ↑",
-    "  [LoadImage] -> [FramePackFindNearestBucket] -> [VAEEncode (start_latent)]",
-    "  [CLIPVisionLoader] -> [CLIPVisionEncode] ────────────> (image_embeds)",
-    "  [VAELoader] ─────────────────────────────────────────> (vae)",
-    "",
-    "The remote driver patches these fields by _meta.title before submitting:",
-    "  'Input Keyframe'        -> inputs.image",
-    "  'Positive Prompt'       -> inputs.text",
-    "  'Negative Prompt'       -> inputs.text",
-    "  'FramePack Sampler'     -> inputs.total_second_length, seed"
-  ],
   "1": {
     "class_type": "LoadFramePackModel",
-    "_meta": { "title": "Load FramePack Model" },
+    "_meta": {
+      "title": "Load FramePack Model"
+    },
     "inputs": {
       "model": "FramePackI2V_HY_fp8_e4m3fn.safetensors",
-      "base_precision": "fp8_e4m3fn",
-      "quantization": "disabled",
-      "attention_mode": "sdpa"
+      "base_precision": "bf16",
+      "quantization": "fp8_e4m3fn",
+      "attention_mode": "sdpa",
+      "load_device": "main_device"
     }
   },
   "2": {
     "class_type": "DualCLIPLoader",
-    "_meta": { "title": "Dual CLIP Loader (HunyuanVideo)" },
+    "_meta": {
+      "title": "Dual CLIP Loader (HunyuanVideo)"
+    },
     "inputs": {
       "clip_name1": "llava_llama3_fp8_scaled.safetensors",
       "clip_name2": "clip_l.safetensors",
@@ -42,37 +25,53 @@
   },
   "3": {
     "class_type": "CLIPTextEncode",
-    "_meta": { "title": "Positive Prompt" },
+    "_meta": {
+      "title": "Positive Prompt"
+    },
     "inputs": {
       "text": "PLACEHOLDER_POS",
-      "clip": ["2", 0]
+      "clip": [
+        "2",
+        0
+      ]
     }
   },
   "4": {
     "class_type": "CLIPTextEncode",
-    "_meta": { "title": "Negative Prompt" },
+    "_meta": {
+      "title": "Negative Prompt"
+    },
     "inputs": {
       "text": "PLACEHOLDER_NEG",
-      "clip": ["2", 0]
+      "clip": [
+        "2",
+        0
+      ]
     }
   },
   "5": {
     "class_type": "VAELoader",
-    "_meta": { "title": "Load VAE" },
+    "_meta": {
+      "title": "Load VAE"
+    },
     "inputs": {
       "vae_name": "hunyuan_video_vae_bf16.safetensors"
     }
   },
   "6": {
     "class_type": "CLIPVisionLoader",
-    "_meta": { "title": "Load CLIP Vision (SigCLIP)" },
+    "_meta": {
+      "title": "Load CLIP Vision (SigCLIP)"
+    },
     "inputs": {
       "clip_name": "sigclip_vision_patch14_384.safetensors"
     }
   },
   "7": {
     "class_type": "LoadImage",
-    "_meta": { "title": "Input Keyframe" },
+    "_meta": {
+      "title": "Input Keyframe"
+    },
     "inputs": {
       "image": "input_keyframe.png",
       "upload": "image"
@@ -80,9 +79,14 @@
   },
   "8": {
     "class_type": "FramePackFindNearestBucket",
-    "_meta": { "title": "FramePack Find Nearest Bucket" },
+    "_meta": {
+      "title": "FramePack Find Nearest Bucket"
+    },
     "inputs": {
-      "image": ["7", 0],
+      "image": [
+        "7",
+        0
+      ],
       "width": 768,
       "height": 432,
       "interpolation": "nearest"
@@ -90,62 +94,108 @@
   },
   "9": {
     "class_type": "VAEEncode",
-    "_meta": { "title": "VAE Encode (Start Latent)" },
+    "_meta": {
+      "title": "VAE Encode (Start Latent)"
+    },
     "inputs": {
-      "pixels": ["8", 0],
-      "vae": ["5", 0]
+      "pixels": [
+        "7",
+        0
+      ],
+      "vae": [
+        "5",
+        0
+      ]
     }
   },
   "10": {
     "class_type": "CLIPVisionEncode",
-    "_meta": { "title": "Encode Image Embeds (SigCLIP)" },
+    "_meta": {
+      "title": "Encode Image Embeds (SigCLIP)"
+    },
     "inputs": {
-      "clip_vision": ["6", 0],
-      "image": ["8", 0],
+      "clip_vision": [
+        "6",
+        0
+      ],
+      "image": [
+        "7",
+        0
+      ],
       "crop": "center"
     }
   },
   "11": {
     "class_type": "FramePackSampler",
-    "_meta": { "title": "FramePack Sampler" },
+    "_meta": {
+      "title": "FramePack Sampler"
+    },
     "inputs": {
-      "model":                  ["1", 0],
-      "positive":               ["3", 0],
-      "negative":               ["4", 0],
-      "start_latent":           ["9", 0],
-      "image_embeds":           ["10", 0],
-      "steps":                  25,
-      "use_teacache":           true,
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "start_latent": [
+        "9",
+        0
+      ],
+      "image_embeds": [
+        "10",
+        0
+      ],
+      "steps": 25,
+      "use_teacache": true,
       "teacache_rel_l1_thresh": 0.15,
-      "cfg":                    7.0,
-      "guidance_scale":         10.0,
-      "shift":                  0.0,
-      "seed":                   42,
-      "latent_window_size":     9,
-      "total_second_length":    10.0,
+      "cfg": 7.0,
+      "guidance_scale": 10.0,
+      "shift": 0.0,
+      "seed": 42,
+      "latent_window_size": 9,
+      "total_second_length": 10.0,
       "gpu_memory_preservation": 6.0,
-      "sampler":                "unipc_bh1"
+      "sampler": "unipc_bh1"
     }
   },
   "12": {
     "class_type": "VAEDecode",
-    "_meta": { "title": "VAE Decode" },
+    "_meta": {
+      "title": "VAE Decode"
+    },
     "inputs": {
-      "samples": ["11", 0],
-      "vae":     ["5", 0]
+      "samples": [
+        "11",
+        0
+      ],
+      "vae": [
+        "5",
+        0
+      ]
     }
   },
   "13": {
     "class_type": "VHS_VideoCombine",
-    "_meta": { "title": "Video Combine (MP4 Output)" },
+    "_meta": {
+      "title": "Video Combine (MP4 Output)"
+    },
     "inputs": {
-      "images":          ["12", 0],
-      "frame_rate":      24,
-      "loop_count":      0,
+      "images": [
+        "12",
+        0
+      ],
+      "frame_rate": 24,
+      "loop_count": 0,
       "filename_prefix": "framepack/output",
-      "format":          "video/h264-mp4",
-      "pingpong":        false,
-      "save_output":     true
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
     }
   }
 }
